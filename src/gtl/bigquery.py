@@ -1,6 +1,6 @@
 """BigQuery operations for gtl."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 
@@ -241,7 +241,7 @@ def upsert_current_files(
 
     # Create temp table
     temp_table = bigquery.Table(temp_table_id, schema=schema)
-    temp_table.expires = datetime.now(timezone.utc)  # Expire immediately after use
+    temp_table.expires = datetime.now(timezone.utc) + timedelta(hours=1)
 
     try:
         client.delete_table(temp_table_id, not_found_ok=True)

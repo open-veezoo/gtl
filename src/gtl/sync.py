@@ -31,8 +31,13 @@ def sync(
     # Auto-detect repo info if not provided
     if not repo_id:
         repo_id = git.get_repo_id()
+        if not repo_id:
+            raise ValueError(
+                "Could not auto-detect repository ID (no git remote origin). "
+                "Please specify --repo-id explicitly."
+            )
 
-    repo_name = git.get_repo_name()
+    repo_name = git.get_repo_name(repo_id)
     repo_url = git.get_repo_url()
 
     if verbose:

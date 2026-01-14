@@ -16,14 +16,18 @@ def run_git(*args: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def get_repo_id() -> str:
+def get_repo_id() -> str | None:
     """Auto-detect repo ID from git remote origin URL.
 
     Converts URLs like:
     - https://github.com/org/repo.git -> github.com/org/repo
     - git@github.com:org/repo.git -> github.com/org/repo
+
+    Returns None if no remote origin is configured.
     """
-    url = run_git("remote", "get-url", "origin")
+    url = run_git("remote", "get-url", "origin", check=False)
+    if not url:
+        return None
 
     # Handle SSH URLs (git@github.com:org/repo.git)
     ssh_match = re.match(r"git@([^:]+):(.+?)(?:\.git)?$", url)
@@ -41,15 +45,18 @@ def get_repo_id() -> str:
     return url
 
 
-def get_repo_name() -> str:
-    """Get the repository name from the remote URL."""
-    repo_id = get_repo_id()
+def get_repo_name(repo_id: str | None = None) -> str | None:
+    """Get the repository name from the remote URL or repo_id."""
+    if repo_id is None:
+        repo_id = get_repo_id()
+    if repo_id is None:
+        return None
     return repo_id.split("/")[-1]
 
 
-def get_repo_url() -> str:
+def get_repo_url() -> str | None:
     """Get the repository URL."""
-    return run_git("remote", "get-url", "origin")
+    return run_git("remote", "get-url", "origin", check=False) or None
 
 
 def get_new_commits(last_sha: str | None) -> list[dict]:
