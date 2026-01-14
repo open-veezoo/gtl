@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 import yaml
 
-from . import sync as sync_module
+from .sync import sync as do_sync, init as do_init
 
 
 def load_config() -> dict:
@@ -77,7 +77,7 @@ def init(project: str | None, dataset: str | None, verbose: bool):
         raise click.ClickException("--dataset is required (or set GTL_DATASET env var)")
 
     try:
-        sync_module.init(
+        do_init(
             project=project,
             dataset=dataset,
             verbose=verbose,
@@ -144,7 +144,7 @@ def sync(
         raise click.ClickException("--dataset is required (or set GTL_DATASET env var)")
 
     try:
-        result = sync_module.sync(
+        result = do_sync(
             project=project,
             dataset=dataset,
             repo_id=repo_id,
