@@ -10,11 +10,23 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.repositories` (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
 );
 
+-- Table: branches
+-- Tracks branches for each repository
+CREATE TABLE IF NOT EXISTS `{project}.{dataset}.branches` (
+    repo_id STRING NOT NULL,
+    name STRING NOT NULL,
+    head_sha STRING,
+    is_default BOOL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
 -- Table: commits
 -- Stores commit metadata
 CREATE TABLE IF NOT EXISTS `{project}.{dataset}.commits` (
     repo_id STRING NOT NULL,
     sha STRING NOT NULL,
+    branch STRING,
     author_name STRING,
     author_email STRING,
     committed_at TIMESTAMP,
@@ -42,6 +54,7 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.file_changes` (
 CREATE TABLE IF NOT EXISTS `{project}.{dataset}.current_files` (
     repo_id STRING NOT NULL,
     file_path STRING NOT NULL,
+    branch STRING,
     content STRING,
     size_bytes INT64,
     last_commit_sha STRING,

@@ -16,6 +16,119 @@ def run_git(*args: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
+def get_current_branch() -> str | None:
+    """Get the currently checked out branch name.
+
+    Returns None if in detached HEAD state or if git command fails.
+    """
+    try:
+        branch = run_git("rev-parse", "--abbrev-ref", "HEAD", check=False)
+        if branch and branch != "HEAD":
+            return branch
+        return None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def get_branches(remote: bool = False) -> list[str]:
+    """Get list of branches.
+
+    Args:
+        remote: If True, list remote branches (origin/*). If False, list local branches.
+
+    Returns:
+        List of branch names (without 'origin/' prefix for remote branches).
+    """
+    try:
+        if remote:
+            output = run_git("branch", "-r", "--format=%(refname:short)", check=False)
+        else:
+            output = run_git("branch", "--format=%(refname:short)", check=False)
+    except subprocess.CalledProcessError:
+        return []
+
+    if not output:
+        return []
+
+    branches = []
+    for line in output.splitlines():
+        branch = line.strip()
+        if not branch:
+            continue
+        # Skip HEAD pointer for remote branches
+        if branch.endswith("/HEAD"):
+            continue
+        # Remove 'origin/' prefix for remote branches
+        if remote and branch.startswith("origin/"):
+            branch = branch[7:]
+        branches.append(branch)
+
+    return branches
+
+
+def get_default_branch() -> str:
+    """Get the default branch name (main or master).
+
+    Checks for existence of main first, then master.
+    Returns 'main' if neither exists.
+    """
+    # Check local branches first
+    local_branches = get_branches(remote=False)
+    if "main" in local_branches:
+        return "main"
+    if "master" in local_branches:
+        return "master"
+
+    # Check remote branches
+    remote_branches = get_branches(remote=True)
+    if "main" in remote_branches:
+        return "main"
+    if "master" in remote_branches:
+        return "master"
+
+    # Default to main
+    return "main"
+
+
+def get_branch_head_sha(branch: str) -> str | None:
+    """Get the HEAD SHA of a branch.
+
+    Args:
+        branch: Branch name
+
+    Returns:
+        The SHA of the branch HEAD, or None if branch doesn't exist.
+    """
+    try:
+        sha = run_git("rev-parse", branch, check=False)
+        if sha:
+            return sha
+        return None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def is_ancestor(ancestor_sha: str, descendant_sha: str) -> bool:
+    """Check if ancestor_sha is an ancestor of descendant_sha.
+
+    Args:
+        ancestor_sha: The potential ancestor commit SHA
+        descendant_sha: The potential descendant commit SHA
+
+    Returns:
+        True if ancestor_sha is an ancestor of descendant_sha.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor_sha, descendant_sha],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+    except subprocess.CalledProcessError:
+        return False
+
+
 def get_repo_id() -> str | None:
     """Auto-detect repo ID from git remote origin URL.
 
@@ -59,18 +172,31 @@ def get_repo_url() -> str | None:
     return run_git("remote", "get-url", "origin", check=False) or None
 
 
-def get_new_commits(last_sha: str | None) -> list[dict]:
+def get_new_commits(last_sha: str | None, branch: str | None = None) -> list[dict]:
     """Get commits since last_sha with metadata.
 
-    Returns commits in oldest-first order for proper insertion.
+    Args:
+        last_sha: The SHA of the last processed commit. If None, returns all commits.
+        branch: The branch to get commits from. If None, uses HEAD.
+
+    Returns:
+        Commits in oldest-first order for proper insertion.
     """
+    # Determine the target ref
+    target_ref = branch if branch else "HEAD"
+
     # Build the revision range
     if last_sha:
-        # Get commits after last_sha up to HEAD
-        rev_range = f"{last_sha}..HEAD"
+        # Check if last_sha is an ancestor of target_ref
+        if not is_ancestor(last_sha, target_ref):
+            # last_sha is not in this branch's history, start from the beginning
+            rev_range = target_ref
+        else:
+            # Get commits after last_sha up to target_ref
+            rev_range = f"{last_sha}..{target_ref}"
     else:
         # Get all commits
-        rev_range = "HEAD"
+        rev_range = target_ref
 
     # Format: sha|parent_sha|author_name|author_email|timestamp|message
     # Use %x00 as delimiter to handle special chars in messages
@@ -80,7 +206,7 @@ def get_new_commits(last_sha: str | None) -> list[dict]:
         output = run_git(
             "log",
             "--reverse",  # Oldest first
-            "--first-parent",  # Only follow first parent (master branch)
+            "--first-parent",  # Only follow first parent
             f"--format={format_str}",
             rev_range,
         )
@@ -228,18 +354,23 @@ def get_file_diff(sha: str, parent_sha: str | None, file_path: str, old_path: st
     return run_git(*diff_args, check=False)
 
 
-def get_current_files(max_size: int) -> list[dict]:
+def get_current_files(max_size: int, branch: str | None = None) -> list[dict]:
     """Get all current text files in repo with contents.
 
     Args:
         max_size: Maximum file size in bytes to include.
+        branch: Optional branch name to get files from. If None, uses working tree.
 
     Returns:
         List of dicts with file_path, content, size_bytes, last_commit_sha.
     """
     files = []
 
-    # Get list of all tracked files
+    if branch:
+        # Get files from a specific branch using git ls-tree
+        return get_files_from_branch(max_size, branch)
+
+    # Get list of all tracked files from working tree
     output = run_git("ls-files")
     if not output:
         return files
@@ -279,6 +410,66 @@ def get_current_files(max_size: int) -> list[dict]:
         files.append({
             "file_path": file_path,
             "content": content_str,
+            "size_bytes": size_bytes,
+            "last_commit_sha": last_commit_sha or None,
+        })
+
+    return files
+
+
+def get_files_from_branch(max_size: int, branch: str) -> list[dict]:
+    """Get all text files from a specific branch.
+
+    Args:
+        max_size: Maximum file size in bytes to include.
+        branch: Branch name to get files from.
+
+    Returns:
+        List of dicts with file_path, content, size_bytes, last_commit_sha.
+    """
+    files = []
+
+    # Get list of all files in the branch
+    try:
+        output = run_git("ls-tree", "-r", "--name-only", branch)
+    except subprocess.CalledProcessError:
+        return files
+
+    if not output:
+        return files
+
+    for file_path in output.splitlines():
+        if not file_path:
+            continue
+
+        # Get file content from the branch
+        try:
+            content = run_git("show", f"{branch}:{file_path}", check=False)
+        except subprocess.CalledProcessError:
+            continue
+
+        if not content:
+            continue
+
+        # Get file size
+        content_bytes = content.encode("utf-8")
+        size_bytes = len(content_bytes)
+
+        if size_bytes > max_size:
+            continue
+
+        # Skip binary files
+        if is_binary(content_bytes):
+            continue
+
+        # Get last commit that touched this file on this branch
+        last_commit_sha = run_git(
+            "log", "-1", "--format=%H", branch, "--", file_path, check=False
+        )
+
+        files.append({
+            "file_path": file_path,
+            "content": content,
             "size_bytes": size_bytes,
             "last_commit_sha": last_commit_sha or None,
         })
