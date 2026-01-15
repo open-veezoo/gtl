@@ -100,6 +100,15 @@ def init(project: str | None, dataset: str | None, verbose: bool):
     help="Repository identifier (auto-detected from git remote if not set)",
 )
 @click.option(
+    "--branch",
+    help="Branch to sync (defaults to current branch)",
+)
+@click.option(
+    "--all-branches",
+    is_flag=True,
+    help="Sync all branches",
+)
+@click.option(
     "--max-file-size",
     type=int,
     help="Maximum file size in bytes (default: 102400)",
@@ -113,6 +122,8 @@ def sync(
     project: str | None,
     dataset: str | None,
     repo_id: str | None,
+    branch: str | None,
+    all_branches: bool,
     max_file_size: int | None,
     verbose: bool,
 ):
@@ -120,12 +131,16 @@ def sync(
 
     Processes all new commits since the last sync and updates
     the current file contents in BigQuery.
+
+    By default, syncs the current branch. Use --branch to specify
+    a different branch, or --all-branches to sync all branches.
     """
     config = load_config()
 
     project = get_config_value(project, "GTL_PROJECT", "project", config)
     dataset = get_config_value(dataset, "GTL_DATASET", "dataset", config)
     repo_id = get_config_value(repo_id, "GTL_REPO_ID", "repo_id", config)
+    branch = get_config_value(branch, "GTL_BRANCH", "branch", config)
     max_file_size = get_config_value(
         max_file_size,
         "GTL_MAX_FILE_SIZE",
@@ -148,6 +163,8 @@ def sync(
             project=project,
             dataset=dataset,
             repo_id=repo_id,
+            branch=branch,
+            all_branches=all_branches,
             max_file_size=max_file_size,
             verbose=verbose,
         )
@@ -156,13 +173,18 @@ def sync(
             click.echo("")
             click.echo("Summary:")
             click.echo(f"  Repository: {result['repo_id']}")
+            if result.get('branches_synced'):
+                click.echo(f"  Branches synced: {', '.join(result['branches_synced'])}")
             click.echo(f"  Commits processed: {result['commits_processed']}")
             click.echo(f"  File changes processed: {result['file_changes_processed']}")
             click.echo(f"  Current files updated: {result['current_files_updated']}")
         else:
+            branches_info = ""
+            if result.get('branches_synced'):
+                branches_info = f" on {', '.join(result['branches_synced'])}"
             click.echo(
                 f"Synced {result['commits_processed']} commits, "
-                f"{result['file_changes_processed']} file changes"
+                f"{result['file_changes_processed']} file changes{branches_info}"
             )
 
     except Exception as e:
